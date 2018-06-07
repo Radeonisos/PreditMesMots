@@ -17,6 +17,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var mDbWorkerThread: DbWorkerThread
     private var mUIHandler = Handler()
     private var myWordList = mutableListOf<Data>()
+    private var myPredictionList = mutableListOf<Data>()
+    private var myFirstPredictionList = mutableListOf<Data>()
     private var hint = mutableListOf("", "", "")
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -24,11 +26,16 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
         mDbWorkerThread = DbWorkerThread("dbWorkerThread")
         mDbWorkerThread.start()
-
         mDB = Database.getInstance(this)
 
         //readCSVFirstTime()
         initFromDB()
+
+        // if nothing is written yet
+        myFirstPredictionList.add(Data(null, "", "je", 1))
+        myFirstPredictionList.add(Data(null, "", "tu", 1))
+        myFirstPredictionList.add(Data(null, "", "oui", 1))
+        hintFirstUpdateUI()
 
         val rootView: ViewGroup = findViewById(android.R.id.content)
         rootView.viewTreeObserver.addOnGlobalLayoutListener {
@@ -48,11 +55,9 @@ class MainActivity : AppCompatActivity() {
             override fun afterTextChanged(p0: Editable?) {
 
                 val task = Runnable {
-
                     var lenghtText: Int = p0.toString().length
 
-                    //devoir récupérer le dernier mot rentré
-
+                    // if I write something
                     if (lenghtText > 0) {
                         //On test si un espace est tapé
                         if (p0.toString().get(lenghtText - 1).isWhitespace()) {
@@ -64,8 +69,16 @@ class MainActivity : AppCompatActivity() {
                             var top3 = getTop3Hint(test)
                             // If i get 3 hints for the word typed
                             if (top3.size == 0) {
-                                insertInDB(Data(null, words[words.size - 2], test, getHintCount(words[words.size - 2], test)))
-                                myWordList.add(Data(null, words[words.size - 2], test, getHintCount(words[words.size - 2], test)))
+                                // if the word typed is not the first word
+                                if (words.size > 1) {
+                                    insertInDB(Data(null, words[words.size - 2], test, getHintCount(words[words.size - 2], test)))
+                                    myWordList.add(Data(null, words[words.size - 2], test, getHintCount(words[words.size - 2], test)))
+                                } else {
+                                    fistWordAdapt(test)
+                                    this@MainActivity.runOnUiThread(java.lang.Runnable {
+                                        hintUpdateUI(top3)
+                                    })
+                                }
                             } else {
                                 // if the word typed is not the first word
                                 if (words.size > 1) {
@@ -81,14 +94,25 @@ class MainActivity : AppCompatActivity() {
                                         // add the pair to DB
                                         insertInDB(Data(null, words[words.size - 2], test, getHintCount(words[words.size - 2], test)))
                                         myWordList.add(Data(null, words[words.size - 2], test, getHintCount(words[words.size - 2], test)))
+                                        this@MainActivity.runOnUiThread(java.lang.Runnable {
+                                            hintUpdateUI(emptyList())
+                                        })
                                     }
                                     // if the word typed is the first word
                                 } else {
+                                    // first word adapt
+                                    fistWordAdapt(test)
                                     this@MainActivity.runOnUiThread(java.lang.Runnable {
                                         hintUpdateUI(top3)
                                     })
                                 }
                             }
+                        }
+                    } else {
+                        if (lenghtText == 0){
+                            this@MainActivity.runOnUiThread(java.lang.Runnable {
+                                hintFirstUpdateUI()
+                            })
                         }
                     }
                 }
@@ -102,9 +126,6 @@ class MainActivity : AppCompatActivity() {
             }
         })
 
-
-
-
         button1.setOnClickListener(View.OnClickListener {
             clickedOnButton1();
         })
@@ -117,16 +138,55 @@ class MainActivity : AppCompatActivity() {
             clickedOnButton3();
         })
 
+    }
 
+    fun fistWordAdapt(word: String){
+        var isPresent = false
+        var indexFound = 0
+        for((index, item) in myFirstPredictionList.withIndex()){
+            if (myFirstPredictionList[index].word2 == word){
+                isPresent = true
+                indexFound = index
+            }
+        }
+        if (!isPresent){
+            myFirstPredictionList.add(Data(null, "", word, 1))
+        } else {
+            myFirstPredictionList[indexFound].count++
+        }
     }
 
     fun hintUpdateUI(top3: List<String>){
+        button1.text = ""
+        button2.text = ""
+        button3.text = ""
         for ((index, value)in top3.withIndex()){
             hint[index] = value
         }
-        button1.text = hint.get(0)
-        button2.text = hint.get(1)
-        button3.text = hint.get(2)
+        if (top3.size == 1){
+            button1.text = hint.get(0)
+        } else {
+            if (top3.size == 2){
+                button1.text = hint.get(0)
+                button2.text = hint.get(1)
+            } else {
+                button1.text = hint.get(0)
+                button2.text = hint.get(1)
+                button3.text = hint.get(2)
+            }
+        }
+
+    }
+
+    fun hintFirstUpdateUI(){
+        myFirstPredictionList.sortByDescending {it.count}
+        button1.text = myFirstPredictionList.get(0).word2
+        button2.text = myFirstPredictionList.get(1).word2
+        button3.text = myFirstPredictionList.get(2).word2
+        hint[0] = myFirstPredictionList.get(0).word2
+        hint[1] = myFirstPredictionList.get(1).word2
+        hint[2] = myFirstPredictionList.get(2).word2
+
     }
 
     fun isComboFound(word1: String, word2: String): Boolean{
@@ -174,28 +234,38 @@ class MainActivity : AppCompatActivity() {
             top3List.sortByDescending {it.count}
         }
         var top3Word = mutableListOf<String>()
-        for (item in top3List.take(3)){
-            top3Word.add(item.word2)
+        var isDifferent = false
+        for (item in top3List){
+            for (item2 in top3Word) {
+                if (item2 == item.word2) {
+                    isDifferent = true
+                }
+            }
+            if (!isDifferent){
+                top3Word.add(item.word2)
+            }
+            isDifferent = false
+            if (top3Word.size == 3){
+                break
+            }
         }
         return top3Word
     }
 
     fun clickedOnButton1(){
-        var toto : String  = edittext.text.toString() + hint.get(0);
+        var toto : String  = edittext.text.toString() + hint.get(0) + " ";
         edittext.text=Editable.Factory.getInstance().newEditable(toto);
         edittext.setSelection(edittext.text.toString().length)
     }
-
 
     fun clickedOnButton2(){
-        var toto : String  = edittext.text.toString() + hint.get(1);
+        var toto : String  = edittext.text.toString() + hint.get(1) + " ";
         edittext.text=Editable.Factory.getInstance().newEditable(toto);
         edittext.setSelection(edittext.text.toString().length)
     }
 
-
     fun clickedOnButton3(){
-        var toto : String  = edittext.text.toString() + hint.get(2);
+        var toto : String  = edittext.text.toString() + hint.get(2) + " ";
         edittext.text=Editable.Factory.getInstance().newEditable(toto);
         edittext.setSelection(edittext.text.toString().length)
     }
